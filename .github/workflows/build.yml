@@ -1,0 +1,31 @@
+﻿name: C++ MinGW Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up MinGW
+      uses: egor-tensin/setup-gcc@v1
+      with:
+        version: 12.2.0 # 指定具体的 GCC 版本
+        platform: x64
+
+    - name: Configure CMake
+      # 明确指定使用 MinGW Makefiles 生成器
+      run: cmake -G "MinGW Makefiles" -S . -B build
+
+    - name: Build project
+      run: cmake --build build
+
+    - name: Run tests
+      run: ./build/my_app.exe
