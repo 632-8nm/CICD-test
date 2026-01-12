@@ -1,32 +1,103 @@
-﻿name: C++ MinGW Build
+﻿name: Build and Release
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    tags:
+      - 'v*' # 仅当推送 v1.0 等标签时触发发布
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      matrix:
+        include:
+          # Windows x64 (在 Windows 运行器上构建)
+          - os: windows
+            arch: x64
+            runner: windows-latest
+            artifact_name: cicd_test-win-x64.exe
+          
+          # Linux x64 (在 Linux 运行器上构建)
+          - os: linux
+            arch: x64
+            runner: ubuntu-latest
+            artifact_name: cicd_test-linux-x64
+
+          # Linux ARM64 (在 Linux 上交叉编译)
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            artifact_name: cicd_test-linux-arm64
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    # 修正点：改用 setup-mingw
-    - name: Set up MinGW
-      uses: egor-tensin/setup-mingw@v2
-      with:
-        platform: x64
-        version: 12.2.0
+      # Windows x64 环境准备
+      - name: Set up MinGW
+        if: matrix.os == 'windows'
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
 
-    - name: Configure CMake
-      # 使用 MinGW Makefiles 并通过参数指定编译器
-      run: cmake -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -S . -B build
+      # Linux ARM64 交叉编译器准备
+      - name: Install ARM64 Toolchain
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-    - name: Build project
-      run: cmake --build build
+      - name: Build
+        shell: bash
+        run: |
+          mkdir build
+          cd build
+          
+          # 根据矩阵变量选择编译方式
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            cmake -G "MinGW Makefiles" -DTARGET_ARCH=${{ matrix.arch }} ..
+          elif [ "${{ matrix.arch }}" == "arm64" ]; then
+            cmake -DCMAKE_SYSTEM_NAME=Linux \
+                  -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+                  -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+                  -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+                  -DTARGET_ARCH=${{ matrix.arch }} ..
+          else
+            cmake -DTARGET_ARCH=${{ matrix.arch }} ..
+          fi
+          
+          cmake --build .
+          
+          # 统一重命名产物
+          if [ -f "cicd_test.exe" ]; then
+            mv cicd_test.exe ../${{ matrix.artifact_name }}
+          else
+            mv cicd_test ../${{ matrix.artifact_name }}
+          fi
 
-    - name: Run tests
-      run: ./build/my_app.exe
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
