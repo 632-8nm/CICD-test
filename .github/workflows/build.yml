@@ -59,7 +59,6 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          # 如果是 Windows，确保使用 MSYS2 的路径
           if [ "${{ matrix.os }}" == "windows" ]; then
             export PATH="/mingw64/bin:$PATH"
           fi
@@ -67,20 +66,19 @@ jobs:
           mkdir build && cd build
           
           if [ "${{ matrix.os }}" == "windows" ]; then
-            # Windows 使用 MinGW 静态链接
-            cmake -G "MinGW Makefiles" \
-                  -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
-                  -DTARGET_ARCH=${{ matrix.arch }} ..
+            cmake -G "MinGW Makefiles" -DTARGET_ARCH=${{ matrix.arch }} ..
           elif [ "${{ matrix.arch }}" == "arm64" ]; then
-            # Linux ARM64 交叉编译
+            # 交叉编译时，确保传入静态链接标志
             cmake -DCMAKE_SYSTEM_NAME=Linux \
                   -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
                   -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
                   -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+                  -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
                   -DTARGET_ARCH=${{ matrix.arch }} ..
           else
-            # Linux x64 标准编译
-            cmake -DTARGET_ARCH=${{ matrix.arch }} ..
+            # Linux x64 同样增加静态链接标志
+            cmake -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+                  -DTARGET_ARCH=${{ matrix.arch }} ..
           fi
           
           cmake --build .

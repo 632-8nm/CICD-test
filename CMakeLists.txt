@@ -10,6 +10,10 @@ add_definitions(-DARCH_NAME="${TARGET_ARCH}")
 
 add_definitions(-DARCH_NAME="${TARGET_ARCH}")
 add_executable(cicd_test main.cpp)
+
 if(WIN32)
     set_target_properties(cicd_test PROPERTIES LINK_FLAGS "-static")
+else()
+    # Linux 下静态链接 libgcc 和 libstdc++
+    target_link_options(cicd_test PRIVATE -static-libgcc -static-libstdc++)
 endif()
