@@ -3,7 +3,7 @@
 on:
   push:
     tags:
-      - 'v*' # 仅当推送 v1.0 等标签时触发发布
+      - 'v*' # 仅当推送 v1.0.0 等以 v 开头的标签时触发发布
 
 jobs:
   build:
@@ -11,19 +11,19 @@ jobs:
     strategy:
       matrix:
         include:
-          # Windows x64 (在 Windows 运行器上构建)
+          # Windows x64 (MSYS2 + MinGW)
           - os: windows
             arch: x64
             runner: windows-latest
             artifact_name: cicd_test-win-x64.exe
           
-          # Linux x64 (在 Linux 运行器上构建)
+          # Linux x64
           - os: linux
             arch: x64
             runner: ubuntu-latest
             artifact_name: cicd_test-linux-x64
 
-          # Linux ARM64 (在 Linux 上交叉编译)
+          # Linux ARM64 (交叉编译)
           - os: linux
             arch: arm64
             runner: ubuntu-latest
@@ -35,45 +35,60 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Windows x64 环境准备
-      - name: Set up MinGW
+      # --- Windows 环境配置 (使用 MSYS2) ---
+      - name: Set up MSYS2
         if: matrix.os == 'windows'
-        uses: egor-tensin/setup-mingw@v2
+        uses: msys2/setup-msys2@v2
         with:
-          platform: x64
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ntldd
 
-      # Linux ARM64 交叉编译器准备
+      # --- Linux ARM64 环境配置 ---
       - name: Install ARM64 Toolchain
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
+      # --- 统一编译逻辑 ---
       - name: Build
         shell: bash
         run: |
-          mkdir build
-          cd build
-          
-          # 根据矩阵变量选择编译方式
+          # 如果是 Windows，确保使用 MSYS2 的路径
           if [ "${{ matrix.os }}" == "windows" ]; then
-            cmake -G "MinGW Makefiles" -DTARGET_ARCH=${{ matrix.arch }} ..
+            export PATH="/mingw64/bin:$PATH"
+          fi
+
+          mkdir build && cd build
+          
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            # Windows 使用 MinGW 静态链接
+            cmake -G "MinGW Makefiles" \
+                  -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
+                  -DTARGET_ARCH=${{ matrix.arch }} ..
           elif [ "${{ matrix.arch }}" == "arm64" ]; then
+            # Linux ARM64 交叉编译
             cmake -DCMAKE_SYSTEM_NAME=Linux \
                   -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
                   -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
                   -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
                   -DTARGET_ARCH=${{ matrix.arch }} ..
           else
+            # Linux x64 标准编译
             cmake -DTARGET_ARCH=${{ matrix.arch }} ..
           fi
           
           cmake --build .
           
-          # 统一重命名产物
+          # 收集产物并重命名
           if [ -f "cicd_test.exe" ]; then
             mv cicd_test.exe ../${{ matrix.artifact_name }}
-          else
+          elif [ -f "cicd_test" ]; then
             mv cicd_test ../${{ matrix.artifact_name }}
           fi
 
@@ -99,5 +114,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: ./dist/*
+          # 自动根据 tag 生成 Release 说明
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
